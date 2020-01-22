@@ -17,6 +17,8 @@ package namespace
 import (
 	"context"
 	"log"
+	"os"
+	"strings"
 
 	"github.com/kubernetes/dashboard/src/app/backend/api"
 	"github.com/kubernetes/dashboard/src/app/backend/errors"
@@ -84,7 +86,17 @@ func toNamespaceList(namespaces []v1.Namespace, nonCriticalErrors []error, dsQue
 	namespaceList.ListMeta = api.ListMeta{TotalItems: filteredTotal}
 	namespaceList.Errors = nonCriticalErrors
 
+	disallowedNamespaces := strings.Split(os.Getenv("DISALLOWED_NAMESPACES"), ",")
+	allowedNamespaces := strings.Split(os.Getenv("ALLOWED_NAMESPACES"), ",")
 	for _, namespace := range namespaces {
+		if stringInSlice(namespace.Name, disallowedNamespaces) {
+			continue
+		}
+		if len(os.Getenv("ALLOWED_NAMESPACES")) > 0 {
+			if !stringInSlice(namespace.Name, allowedNamespaces) {
+				continue
+			}
+		}
 		namespaceList.Namespaces = append(namespaceList.Namespaces, toNamespace(namespace))
 	}
 
@@ -97,4 +109,13 @@ func toNamespace(namespace v1.Namespace) Namespace {
 		TypeMeta:   api.NewTypeMeta(api.ResourceKindNamespace),
 		Phase:      namespace.Status.Phase,
 	}
+}
+
+func stringInSlice(a string, list []string) bool {
+	for _, b := range list {
+		if b == a {
+			return true
+		}
+	}
+	return false
 }

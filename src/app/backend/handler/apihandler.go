@@ -15,8 +15,10 @@
 package handler
 
 import (
+	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 
@@ -28,10 +30,6 @@ import (
 	"github.com/kubernetes/dashboard/src/app/backend/plugin"
 
 	"github.com/emicklei/go-restful"
-	"golang.org/x/net/xsrftoken"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/tools/remotecommand"
-
 	"github.com/kubernetes/dashboard/src/app/backend/api"
 	"github.com/kubernetes/dashboard/src/app/backend/auth"
 	authApi "github.com/kubernetes/dashboard/src/app/backend/auth/api"
@@ -73,6 +71,9 @@ import (
 	settingsApi "github.com/kubernetes/dashboard/src/app/backend/settings/api"
 	"github.com/kubernetes/dashboard/src/app/backend/systembanner"
 	"github.com/kubernetes/dashboard/src/app/backend/validation"
+	"golang.org/x/net/xsrftoken"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/remotecommand"
 )
 
 const (
@@ -675,6 +676,45 @@ func CreateHTTPAPIHandler(iManager integration.IntegrationManager, cManager clie
 	return wsContainer, nil
 }
 
+func stringInSlice(a string, list []string) bool {
+	for _, b := range list {
+		if b == a {
+			return true
+		}
+	}
+	return false
+}
+
+func skipNamespace(namespace string) bool {
+	disallowedNamespaces := strings.Split(os.Getenv("DISALLOWED_NAMESPACES"), ",")
+	allowedNamespaces := strings.Split(os.Getenv("ALLOWED_NAMESPACES"), ",")
+
+	if len(os.Getenv("ALLOWED_NAMESPACES")) > 0 {
+		if stringInSlice(namespace, allowedNamespaces) != true {
+			fmt.Println("SKIP NAMESPACE BECAUSE NOT IN ALLOWED")
+			return true
+		}
+		if namespace == "" {
+			fmt.Println("SKIP NAMESPACE BECAUSE ALLOWED IS SET AND STRING IS EMPTY")
+			return true
+		}
+	}
+
+	if len(os.Getenv("DISALLOWED_NAMESPACES")) > 0 {
+		if stringInSlice(namespace, disallowedNamespaces) == true {
+			fmt.Println("SKIP NAMESPACE BECAUSE IN DISALLOWED")
+			return true
+		}
+
+		if namespace == "" {
+			fmt.Println("SKIP NAMESPACE BECAUSE DISALLOWED SET AND EMTPY")
+			return true
+		}
+	}
+
+	return false
+}
+
 func (apiHandler *APIHandler) handleGetClusterRoleList(request *restful.Request, response *restful.Response) {
 	k8sClient, err := apiHandler.cManager.Client(request)
 	if err != nil {
@@ -747,6 +787,10 @@ func (apiHandler *APIHandler) handleGetRoleList(request *restful.Request, respon
 	}
 
 	namespace := parseNamespacePathParameter(request)
+	if skipNamespace(namespace.ToRequestParam()) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	result, err := role.GetRoleList(k8sClient, namespace, dataSelect)
 	if err != nil {
@@ -764,6 +808,10 @@ func (apiHandler *APIHandler) handleGetRoleDetail(request *restful.Request, resp
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("name")
 	result, err := role.GetRoleDetail(k8sClient, namespace, name)
 	if err != nil {
@@ -781,6 +829,10 @@ func (apiHandler *APIHandler) handleGetRoleBindingList(request *restful.Request,
 	}
 
 	namespace := parseNamespacePathParameter(request)
+	if skipNamespace(namespace.ToRequestParam()) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	result, err := rolebinding.GetRoleBindingList(k8sClient, namespace, dataSelect)
 	if err != nil {
@@ -798,6 +850,10 @@ func (apiHandler *APIHandler) handleGetRoleBindingDetail(request *restful.Reques
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("name")
 	result, err := rolebinding.GetRoleBindingDetail(k8sClient, namespace, name)
 	if err != nil {
@@ -821,6 +877,10 @@ func (apiHandler *APIHandler) handleGetStatefulSetList(request *restful.Request,
 	}
 
 	namespace := parseNamespacePathParameter(request)
+	if skipNamespace(namespace.ToRequestParam()) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	dataSelect.MetricQuery = dataselect.StandardMetrics
 	result, err := statefulset.GetStatefulSetList(k8sClient, namespace, dataSelect,
@@ -840,6 +900,10 @@ func (apiHandler *APIHandler) handleGetStatefulSetDetail(request *restful.Reques
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("statefulset")
 	result, err := statefulset.GetStatefulSetDetail(k8sClient, apiHandler.iManager.Metric().Client(), namespace, name)
 
@@ -858,6 +922,10 @@ func (apiHandler *APIHandler) handleGetStatefulSetPods(request *restful.Request,
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("statefulset")
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	dataSelect.MetricQuery = dataselect.StandardMetrics
@@ -877,6 +945,10 @@ func (apiHandler *APIHandler) handleGetStatefulSetEvents(request *restful.Reques
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("statefulset")
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	result, err := event.GetResourceEvents(k8sClient, dataSelect, namespace, name)
@@ -895,6 +967,10 @@ func (apiHandler *APIHandler) handleGetServiceList(request *restful.Request, res
 	}
 
 	namespace := parseNamespacePathParameter(request)
+	if skipNamespace(namespace.ToRequestParam()) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	result, err := resourceService.GetServiceList(k8sClient, namespace, dataSelect)
 	if err != nil {
@@ -912,6 +988,10 @@ func (apiHandler *APIHandler) handleGetServiceDetail(request *restful.Request, r
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("service")
 	result, err := resourceService.GetServiceDetail(k8sClient, namespace, name)
 	if err != nil {
@@ -929,6 +1009,10 @@ func (apiHandler *APIHandler) handleGetServiceEvent(request *restful.Request, re
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("service")
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	dataSelect.MetricQuery = dataselect.StandardMetrics
@@ -1018,6 +1102,10 @@ func (apiHandler *APIHandler) handleGetIngressDetail(request *restful.Request, r
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("name")
 	result, err := ingress.GetIngressDetail(k8sClient, namespace, name)
 	if err != nil {
@@ -1036,6 +1124,10 @@ func (apiHandler *APIHandler) handleGetIngressList(request *restful.Request, res
 
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	namespace := parseNamespacePathParameter(request)
+	if skipNamespace(namespace.ToRequestParam()) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	result, err := ingress.GetIngressList(k8sClient, namespace, dataSelect)
 	if err != nil {
 		errors.HandleInternalError(response, err)
@@ -1052,6 +1144,10 @@ func (apiHandler *APIHandler) handleGetServicePods(request *restful.Request, res
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("service")
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	dataSelect.MetricQuery = dataselect.StandardMetrics
@@ -1195,6 +1291,10 @@ func (apiHandler *APIHandler) handleScaleResource(request *restful.Request, resp
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	kind := request.PathParameter("kind")
 	name := request.PathParameter("name")
 	count := request.QueryParameter("scaleBy")
@@ -1214,6 +1314,10 @@ func (apiHandler *APIHandler) handleGetReplicaCount(request *restful.Request, re
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	kind := request.PathParameter("kind")
 	name := request.PathParameter("name")
 	replicaCounts, err := scaling.GetReplicaCounts(cfg, kind, namespace, name)
@@ -1234,6 +1338,11 @@ func (apiHandler *APIHandler) handleDeployFromFile(request *restful.Request, res
 	deploymentSpec := new(deployment.AppDeploymentFromFileSpec)
 	if err := request.ReadEntity(deploymentSpec); err != nil {
 		errors.HandleInternalError(response, err)
+		return
+	}
+
+	if skipNamespace(deploymentSpec.Namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
 		return
 	}
 
@@ -1313,6 +1422,10 @@ func (apiHandler *APIHandler) handleGetReplicationControllerList(request *restfu
 	}
 
 	namespace := parseNamespacePathParameter(request)
+	if skipNamespace(namespace.ToRequestParam()) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	dataSelect.MetricQuery = dataselect.StandardMetrics
 	result, err := replicationcontroller.GetReplicationControllerList(k8sClient, namespace, dataSelect, apiHandler.iManager.Metric().Client())
@@ -1331,6 +1444,10 @@ func (apiHandler *APIHandler) handleGetReplicaSets(request *restful.Request, res
 	}
 
 	namespace := parseNamespacePathParameter(request)
+	if skipNamespace(namespace.ToRequestParam()) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	dataSelect.MetricQuery = dataselect.StandardMetrics
 	result, err := replicaset.GetReplicaSetList(k8sClient, namespace, dataSelect, apiHandler.iManager.Metric().Client())
@@ -1349,6 +1466,10 @@ func (apiHandler *APIHandler) handleGetReplicaSetDetail(request *restful.Request
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	replicaSet := request.PathParameter("replicaSet")
 	result, err := replicaset.GetReplicaSetDetail(k8sClient, apiHandler.iManager.Metric().Client(), namespace, replicaSet)
 
@@ -1368,6 +1489,10 @@ func (apiHandler *APIHandler) handleGetReplicaSetPods(request *restful.Request, 
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	replicaSet := request.PathParameter("replicaSet")
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	dataSelect.MetricQuery = dataselect.StandardMetrics
@@ -1388,6 +1513,10 @@ func (apiHandler *APIHandler) handleGetReplicaSetServices(request *restful.Reque
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	replicaSet := request.PathParameter("replicaSet")
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	dataSelect.MetricQuery = dataselect.StandardMetrics
@@ -1408,6 +1537,10 @@ func (apiHandler *APIHandler) handleGetReplicaSetEvents(request *restful.Request
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("replicaSet")
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	dataSelect.MetricQuery = dataselect.StandardMetrics
@@ -1429,6 +1562,10 @@ func (apiHandler *APIHandler) handleGetPodEvents(request *restful.Request, respo
 
 	log.Println("Getting events related to a pod in namespace")
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("pod")
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	dataSelect.MetricQuery = dataselect.StandardMetrics
@@ -1477,6 +1614,10 @@ func (apiHandler *APIHandler) handleGetDeployments(request *restful.Request, res
 	}
 
 	namespace := parseNamespacePathParameter(request)
+	if skipNamespace(namespace.ToRequestParam()) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	dataSelect.MetricQuery = dataselect.StandardMetrics
 	result, err := deployment.GetDeploymentList(k8sClient, namespace, dataSelect, apiHandler.iManager.Metric().Client())
@@ -1495,6 +1636,10 @@ func (apiHandler *APIHandler) handleGetDeploymentDetail(request *restful.Request
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("deployment")
 	result, err := deployment.GetDeploymentDetail(k8sClient, namespace, name)
 	if err != nil {
@@ -1513,6 +1658,10 @@ func (apiHandler *APIHandler) handleGetDeploymentEvents(request *restful.Request
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("deployment")
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	result, err := event.GetResourceEvents(k8sClient, dataSelect, namespace, name)
@@ -1531,6 +1680,10 @@ func (apiHandler *APIHandler) handleGetDeploymentOldReplicaSets(request *restful
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("deployment")
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	dataSelect.MetricQuery = dataselect.StandardMetrics
@@ -1550,6 +1703,10 @@ func (apiHandler *APIHandler) handleGetDeploymentNewReplicaSet(request *restful.
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("deployment")
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	dataSelect.MetricQuery = dataselect.StandardMetrics
@@ -1569,6 +1726,10 @@ func (apiHandler *APIHandler) handleGetPods(request *restful.Request, response *
 	}
 
 	namespace := parseNamespacePathParameter(request)
+	if skipNamespace(namespace.ToRequestParam()) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	dataSelect.MetricQuery = dataselect.StandardMetrics // download standard metrics - cpu, and memory - by default
 	result, err := pod.GetPodList(k8sClient, apiHandler.iManager.Metric().Client(), namespace, dataSelect)
@@ -1587,6 +1748,10 @@ func (apiHandler *APIHandler) handleGetPodDetail(request *restful.Request, respo
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("pod")
 	result, err := pod.GetPodDetail(k8sClient, apiHandler.iManager.Metric().Client(), namespace, name)
 	if err != nil {
@@ -1604,6 +1769,10 @@ func (apiHandler *APIHandler) handleGetReplicationControllerDetail(request *rest
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("replicationController")
 	result, err := replicationcontroller.GetReplicationControllerDetail(k8sClient, namespace, name)
 	if err != nil {
@@ -1621,6 +1790,10 @@ func (apiHandler *APIHandler) handleUpdateReplicasCount(request *restful.Request
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("replicationController")
 	spec := new(replicationcontroller.ReplicationControllerSpec)
 	if err := request.ReadEntity(spec); err != nil {
@@ -1651,6 +1824,10 @@ func (apiHandler *APIHandler) handleGetResource(request *restful.Request, respon
 
 	kind := request.PathParameter("kind")
 	namespace, ok := request.PathParameters()["namespace"]
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("name")
 	result, err := verber.Get(kind, ok, namespace, name)
 	if err != nil {
@@ -1677,6 +1854,10 @@ func (apiHandler *APIHandler) handlePutResource(
 
 	kind := request.PathParameter("kind")
 	namespace, ok := request.PathParameters()["namespace"]
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("name")
 	putSpec := &runtime.Unknown{}
 	if err := request.ReadEntity(putSpec); err != nil {
@@ -1708,6 +1889,10 @@ func (apiHandler *APIHandler) handleDeleteResource(
 
 	kind := request.PathParameter("kind")
 	namespace, ok := request.PathParameters()["namespace"]
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("name")
 
 	if err := verber.Delete(kind, ok, namespace, name); err != nil {
@@ -1744,6 +1929,10 @@ func (apiHandler *APIHandler) handleGetReplicationControllerPods(request *restfu
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	rc := request.PathParameter("replicationController")
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	dataSelect.MetricQuery = dataselect.StandardMetrics
@@ -1851,6 +2040,10 @@ func (apiHandler *APIHandler) handleGetSecretDetail(request *restful.Request, re
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("name")
 	result, err := secret.GetSecretDetail(k8sClient, namespace, name)
 	if err != nil {
@@ -1869,6 +2062,10 @@ func (apiHandler *APIHandler) handleGetSecretList(request *restful.Request, resp
 
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	namespace := parseNamespacePathParameter(request)
+	if skipNamespace(namespace.ToRequestParam()) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	result, err := secret.GetSecretList(k8sClient, namespace, dataSelect)
 	if err != nil {
 		errors.HandleInternalError(response, err)
@@ -1885,6 +2082,10 @@ func (apiHandler *APIHandler) handleGetConfigMapList(request *restful.Request, r
 	}
 
 	namespace := parseNamespacePathParameter(request)
+	if skipNamespace(namespace.ToRequestParam()) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	result, err := configmap.GetConfigMapList(k8sClient, namespace, dataSelect)
 	if err != nil {
@@ -1902,6 +2103,10 @@ func (apiHandler *APIHandler) handleGetConfigMapDetail(request *restful.Request,
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("configmap")
 	result, err := configmap.GetConfigMapDetail(k8sClient, namespace, name)
 	if err != nil {
@@ -1951,6 +2156,10 @@ func (apiHandler *APIHandler) handleGetPersistentVolumeClaimList(request *restfu
 	}
 
 	namespace := parseNamespacePathParameter(request)
+	if skipNamespace(namespace.ToRequestParam()) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	result, err := persistentvolumeclaim.GetPersistentVolumeClaimList(k8sClient, namespace, dataSelect)
 	if err != nil {
@@ -1968,6 +2177,10 @@ func (apiHandler *APIHandler) handleGetPersistentVolumeClaimDetail(request *rest
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("name")
 	result, err := persistentvolumeclaim.GetPersistentVolumeClaimDetail(k8sClient, namespace, name)
 	if err != nil {
@@ -1985,6 +2198,10 @@ func (apiHandler *APIHandler) handleGetPodContainers(request *restful.Request, r
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("pod")
 	result, err := container.GetPodContainers(k8sClient, namespace, name)
 	if err != nil {
@@ -2002,6 +2219,10 @@ func (apiHandler *APIHandler) handleGetReplicationControllerEvents(request *rest
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("replicationController")
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	result, err := event.GetResourceEvents(k8sClient, dataSelect, namespace, name)
@@ -2021,6 +2242,10 @@ func (apiHandler *APIHandler) handleGetReplicationControllerServices(request *re
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("replicationController")
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	result, err := replicationcontroller.GetReplicationControllerServices(k8sClient, dataSelect, namespace, name)
@@ -2039,6 +2264,10 @@ func (apiHandler *APIHandler) handleGetDaemonSetList(request *restful.Request, r
 	}
 
 	namespace := parseNamespacePathParameter(request)
+	if skipNamespace(namespace.ToRequestParam()) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	dataSelect.MetricQuery = dataselect.StandardMetrics
 	result, err := daemonset.GetDaemonSetList(k8sClient, namespace, dataSelect, apiHandler.iManager.Metric().Client())
@@ -2058,6 +2287,10 @@ func (apiHandler *APIHandler) handleGetDaemonSetDetail(
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("daemonSet")
 	result, err := daemonset.GetDaemonSetDetail(k8sClient, apiHandler.iManager.Metric().Client(), namespace, name)
 	if err != nil {
@@ -2075,6 +2308,10 @@ func (apiHandler *APIHandler) handleGetDaemonSetPods(request *restful.Request, r
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("daemonSet")
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	dataSelect.MetricQuery = dataselect.StandardMetrics
@@ -2094,6 +2331,10 @@ func (apiHandler *APIHandler) handleGetDaemonSetServices(request *restful.Reques
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	daemonSet := request.PathParameter("daemonSet")
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	result, err := daemonset.GetDaemonSetServices(k8sClient, dataSelect, namespace, daemonSet)
@@ -2112,6 +2353,10 @@ func (apiHandler *APIHandler) handleGetDaemonSetEvents(request *restful.Request,
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("daemonSet")
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	result, err := event.GetResourceEvents(k8sClient, dataSelect, namespace, name)
@@ -2131,6 +2376,10 @@ func (apiHandler *APIHandler) handleGetHorizontalPodAutoscalerList(request *rest
 	}
 
 	namespace := parseNamespacePathParameter(request)
+	if skipNamespace(namespace.ToRequestParam()) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	result, err := horizontalpodautoscaler.GetHorizontalPodAutoscalerList(k8sClient, namespace, dataSelect)
 	if err != nil {
@@ -2149,6 +2398,10 @@ func (apiHandler *APIHandler) handleGetHorizontalPodAutoscalerListForResource(re
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("name")
 	kind := request.PathParameter("kind")
 	result, err := horizontalpodautoscaler.GetHorizontalPodAutoscalerListForResource(k8sClient, namespace, kind, name)
@@ -2167,6 +2420,10 @@ func (apiHandler *APIHandler) handleGetHorizontalPodAutoscalerDetail(request *re
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("horizontalpodautoscaler")
 	result, err := horizontalpodautoscaler.GetHorizontalPodAutoscalerDetail(k8sClient, namespace, name)
 	if err != nil {
@@ -2184,6 +2441,10 @@ func (apiHandler *APIHandler) handleGetJobList(request *restful.Request, respons
 	}
 
 	namespace := parseNamespacePathParameter(request)
+	if skipNamespace(namespace.ToRequestParam()) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	dataSelect.MetricQuery = dataselect.StandardMetrics
 	result, err := job.GetJobList(k8sClient, namespace, dataSelect, apiHandler.iManager.Metric().Client())
@@ -2202,6 +2463,10 @@ func (apiHandler *APIHandler) handleGetJobDetail(request *restful.Request, respo
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("name")
 	result, err := job.GetJobDetail(k8sClient, namespace, name)
 	if err != nil {
@@ -2219,6 +2484,10 @@ func (apiHandler *APIHandler) handleGetJobPods(request *restful.Request, respons
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("name")
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	dataSelect.MetricQuery = dataselect.StandardMetrics
@@ -2238,6 +2507,10 @@ func (apiHandler *APIHandler) handleGetJobEvents(request *restful.Request, respo
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("name")
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	result, err := job.GetJobEvents(k8sClient, dataSelect, namespace, name)
@@ -2256,6 +2529,10 @@ func (apiHandler *APIHandler) handleGetCronJobList(request *restful.Request, res
 	}
 
 	namespace := parseNamespacePathParameter(request)
+	if skipNamespace(namespace.ToRequestParam()) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	dataSelect.MetricQuery = dataselect.StandardMetrics
 	result, err := cronjob.GetCronJobList(k8sClient, namespace, dataSelect, apiHandler.iManager.Metric().Client())
@@ -2274,6 +2551,10 @@ func (apiHandler *APIHandler) handleGetCronJobDetail(request *restful.Request, r
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("name")
 	result, err := cronjob.GetCronJobDetail(k8sClient, namespace, name)
 	if err != nil {
@@ -2291,6 +2572,10 @@ func (apiHandler *APIHandler) handleGetCronJobJobs(request *restful.Request, res
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("name")
 	active := true
 	if request.QueryParameter("active") == "false" {
@@ -2314,6 +2599,10 @@ func (apiHandler *APIHandler) handleGetCronJobEvents(request *restful.Request, r
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("name")
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	result, err := cronjob.GetCronJobEvents(k8sClient, dataSelect, namespace, name)
@@ -2332,6 +2621,10 @@ func (apiHandler *APIHandler) handleTriggerCronJob(request *restful.Request, res
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	name := request.PathParameter("name")
 	err = cronjob.TriggerCronJob(k8sClient, namespace, name)
 	if err != nil {
@@ -2402,6 +2695,10 @@ func (apiHandler *APIHandler) handleGetPodPersistentVolumeClaims(request *restfu
 
 	name := request.PathParameter("pod")
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	result, err := persistentvolumeclaim.GetPodPersistentVolumeClaims(k8sClient,
 		namespace, name, dataSelect)
@@ -2467,6 +2764,10 @@ func (apiHandler *APIHandler) handleGetCustomResourceObjectList(request *restful
 
 	crdName := request.PathParameter("crd")
 	namespace := parseNamespacePathParameter(request)
+	if skipNamespace(namespace.ToRequestParam()) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	result, err := customresourcedefinition.GetCustomResourceObjectList(apiextensionsclient, config, namespace, dataSelect, crdName)
 	if err != nil {
@@ -2493,6 +2794,10 @@ func (apiHandler *APIHandler) handleGetCustomResourceObjectDetail(request *restf
 	name := request.PathParameter("object")
 	crdName := request.PathParameter("crd")
 	namespace := parseNamespacePathParameter(request)
+	if skipNamespace(namespace.ToRequestParam()) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	result, err := customresourcedefinition.GetCustomResourceObjectDetail(apiextensionsclient, namespace, config, crdName, name)
 	if err != nil {
 		errors.HandleInternalError(response, err)
@@ -2513,6 +2818,10 @@ func (apiHandler *APIHandler) handleGetCustomResourceObjectEvents(request *restf
 
 	name := request.PathParameter("object")
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	dataSelect := parser.ParseDataSelectPathParameter(request)
 	dataSelect.MetricQuery = dataselect.StandardMetrics
 	result, err := customresourcedefinition.GetEventsForCustomResourceObject(k8sClient, dataSelect, namespace, name)
@@ -2534,6 +2843,10 @@ func (apiHandler *APIHandler) handleLogSource(request *restful.Request, response
 	resourceName := request.PathParameter("resourceName")
 	resourceType := request.PathParameter("resourceType")
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	logSources, err := logs.GetLogSources(k8sClient, namespace, resourceName, resourceType)
 	if err != nil {
 		errors.HandleInternalError(response, err)
@@ -2550,6 +2863,10 @@ func (apiHandler *APIHandler) handleLogs(request *restful.Request, response *res
 	}
 
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	podID := request.PathParameter("pod")
 	containerID := request.PathParameter("container")
 
@@ -2595,6 +2912,10 @@ func (apiHandler *APIHandler) handleLogFile(request *restful.Request, response *
 		return
 	}
 	namespace := request.PathParameter("namespace")
+	if skipNamespace(namespace) == true {
+		errors.IsForbiddenError(errors.NewUnauthorized("Request to not allowed namespace"))
+		return
+	}
 	podID := request.PathParameter("pod")
 	containerID := request.PathParameter("container")
 	usePreviousLogs := request.QueryParameter("previous") == "true"
